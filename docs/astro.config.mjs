@@ -6,7 +6,7 @@ import starlight from '@astrojs/starlight';
 export default defineConfig({
 	integrations: [
 		starlight({
-			title: 'セキュリティ・キャンプ2026ミニ 長崎',
+			title: '作って学ぶLinuxコンテナの仕組みとセキュリティ',
 			sidebar: [
 				{
 					label: 'Guides',
