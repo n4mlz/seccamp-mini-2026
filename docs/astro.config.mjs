@@ -2,8 +2,16 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
+const [githubOwner, repositoryName] = process.env.GITHUB_REPOSITORY?.split('/') ?? [];
+const site = githubOwner ? `https://${githubOwner}.github.io` : undefined;
+const isProjectPage = Boolean(
+	githubOwner && repositoryName && repositoryName !== `${githubOwner}.github.io`,
+);
+
 // https://astro.build/config
 export default defineConfig({
+	site,
+	base: isProjectPage ? `/${repositoryName}` : '/',
 	integrations: [
 		starlight({
 			title: '作って学ぶLinuxコンテナの仕組みとセキュリティ',
