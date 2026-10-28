@@ -1,6 +1,7 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+import mermaid from 'astro-mermaid';
 
 const [githubOwner, repositoryName] = process.env.GITHUB_REPOSITORY?.split('/') ?? [];
 const site = githubOwner ? `https://${githubOwner}.github.io` : undefined;
@@ -13,6 +14,7 @@ export default defineConfig({
 	site,
 	base: isProjectPage ? `/${repositoryName}` : '/',
 	integrations: [
+		mermaid({ autoTheme: true }),
 		starlight({
 			title: '作って学ぶLinuxコンテナの仕組みとセキュリティ',
 			sidebar: [

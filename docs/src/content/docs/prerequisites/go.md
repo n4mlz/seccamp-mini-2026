@@ -90,4 +90,8 @@ go run main.go ls -l /
 
 当日の演習は、[開発環境](../environment/) で用意する Dev Container の上で行います。確認が終わったら、`docker rm -f go-env` でコンテナを削除して構いません。
 
+---
+
+注釈
+
 [^1]: Command Line Interface の略。ターミナルから呼び出して実行するプログラム。
