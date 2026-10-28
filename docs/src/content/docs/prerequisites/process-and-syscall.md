@@ -62,20 +62,20 @@ Linux では、主に2つの syscall を組み合わせてプログラムを実�
 
 ### 実際に見てみる
 
-`strace` を使うと、プロセスが呼び出した syscall を見られます。[開発環境](../environment/) で試してみてください。`strace` が入っていなければ、`sudo apt-get install -y strace` でインストールできます。
+`strace` を使うと、プロセスが呼び出した syscall を見られます。[開発環境](../environment/) で試してみてください。`strace` が入っていなければ、`sudo apt-get update && sudo apt-get install -y strace` でインストールできます。
 
 ```sh
-strace -f -e trace=execve,clone,clone3,wait4 sh -c 'ls > /dev/null'
+strace -f -e trace=execve,clone,clone3,wait4 bash -c 'ls > /dev/null'
 ```
 
 出力は次のようになります（数字は環境によって変わります）。
 
 ```text
-execve("/usr/bin/sh", ["sh", "-c", "ls > /dev/null"], ...) = 0
-clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, ...) = 1964166
-[pid 1964165] wait4(-1 <unfinished ...>
-[pid 1964166] execve("/usr/bin/ls", ["ls"], ...) = 0
-[pid 1964166] +++ exited with 0 +++
+execve("/usr/bin/bash", ["bash", "-c", "ls > /dev/null"], ...) = 0
+clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, ...) = 44
+[pid    43] wait4(-1 <unfinished ...>
+[pid    44] execve("/usr/bin/ls", ["ls"], ...) = 0
+[pid    44] +++ exited with 0 +++
 ```
 
-`sh` が起動し、`clone` で子プロセスを作ります。子プロセスの pid は、上記では結果的に PID 1964166 が割り振られました。次に、その子が `execve` で `ls` に置き換わり、親は `wait4` で子の終了を待っています。先ほどの syscall の説明とそのままの挙動をしています。
+`bash` が起動し、`clone` で子プロセスを作ります。子プロセスには、上記では PID 44 が割り振られました。次に、その子が `execve` で `ls` に置き換わり、親は `wait4` で子の終了を待っています。先ほどの syscall の説明とそのままの挙動をしています。
