@@ -16,16 +16,15 @@ export default defineConfig({
 		starlight({
 			title: '作って学ぶLinuxコンテナの仕組みとセキュリティ',
 			sidebar: [
+				{ label: '講義の概要', slug: 'overview' },
 				{
-					label: 'Guides',
+					label: '事前学習',
 					items: [
-						// Each item here is one entry in the navigation menu.
-						{ label: 'Example Guide', slug: 'guides/example' },
+						{ label: '事前学習について', slug: 'prerequisites' },
+						{ label: '1. Go の基本', slug: 'prerequisites/go' },
+						{ label: '2. 開発環境', slug: 'prerequisites/environment' },
+						{ label: '3. 応募課題の解説', slug: 'prerequisites/process-and-syscall' },
 					],
-				},
-				{
-					label: 'Reference',
-					items: [{ autogenerate: { directory: 'reference' } }],
 				},
 			],
 		}),
