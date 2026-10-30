@@ -53,6 +53,16 @@ export default defineConfig({
 						{ label: '11. トラブルシューティング', slug: 'part2/troubleshooting' },
 					],
 				},
+				{
+					label: '第3章 理解した上で考える',
+					items: [
+						{ label: '1. 自作したランタイムの位置づけ', slug: 'part3/runtime-position' },
+						{ label: '2. 理解した上で考える', slug: 'part3/think-with-knowledge' },
+						{ label: '3. 隔離の限界と過去の脆弱性', slug: 'part3/limits-and-vulnerabilities' },
+						{ label: '4. コンテナ技術の最近の動向', slug: 'part3/recent-trends' },
+						{ label: '5. その先', slug: 'part3/next-steps' },
+					],
+				},
 			],
 		}),
 	],
