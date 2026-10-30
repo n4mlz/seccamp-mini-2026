@@ -60,7 +60,7 @@ export default defineConfig({
 						{ label: '1. 自作したランタイムの位置づけ', slug: 'part3/runtime-position' },
 						{ label: '2. コンテナを理解した上で考える', slug: 'part3/think-with-knowledge' },
 						{ label: '3. コンテナ技術の最近の動向', slug: 'part3/recent-trends' },
-						{ label: '4. その先', slug: 'part3/next-steps' },
+						{ label: '4. この講義のその先', slug: 'part3/next-steps' },
 					],
 				},
 			],
