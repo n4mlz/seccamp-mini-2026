@@ -59,63 +59,213 @@ sequenceDiagram
 
 実装は、`ip` コマンドを呼び出す形で行います。
 
-`network.go` を新しく作って、親が呼ぶ `setupHostNetwork(pid)` と、子が呼ぶ `setupContainerNetwork()` を書きます。前者は、veth の組を作って、片方 (名前は `eth0`) を `pid` の network namespace に入れて、もう片方に `10.0.0.1/24` を設定します。後者は、`lo` と `eth0` を有効にして、`eth0` に `10.0.0.2/24` を設定します。
+`network.go` を新しく作って、親が呼ぶ `setupHostNetwork(pid)` と、子が呼ぶ `setupContainerNetwork()` を書きます。前者は、veth の組を作って、片方 (名前は `eth0`) を `pid` の network namespace に入れて、もう片方に `10.0.0.1/24` を設定します。前者は、後片付け用の関数 (ホスト側の veth を削除する) も返します。後者は、`lo` と `eth0` を有効にして、`eth0` に `10.0.0.2/24` を設定します。
 
 `container.go` の `run` では、`-net` のときに `CLONE_NEWNET` を足して、パイプを作って子に渡します。子を起動した後に `setupHostNetwork` を呼んで、それからパイプを閉じます。`child` では、パイプが閉じるのを待ってから、`-net` のときに `setupContainerNetwork` を呼びます。
 
-<details>
-<summary>ヒント 1</summary>
+次の雛形の、コメントで示した場所に実装を書きます。`-` の行は消してください。
 
-`ip link add vethXXXX type veth peer name eth0 netns <PID>` というコマンドで、veth の組を作って、片方を指定した PID の namespace に、同時に入れられます。
-
-パイプは `os.Pipe()` で作ります。読む側を `cmd.ExtraFiles` に渡すと、子ではファイルディスクリプタの 3 番になります。子は、これを書く側が閉じるまで (`io.Copy` などで) 読み続けます。
-
-</details>
-
-<details>
-<summary>ヒント 2</summary>
-
-`network.go` には、`ip` コマンドを呼ぶ小さな関数を用意しておくと書きやすいです。
+`network.go` は、新しく作るファイルです。`ip` コマンドを呼ぶ小さな関数を用意しておくと書きやすいです。
 
 ```go title="network.go"
+package main
+
 func ip(args ...string) error {
 	cmd := exec.Command("ip", args...)
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// setupHostNetwork は、親が呼ぶ。返される関数は、ホスト側の veth を削除する。
+func setupHostNetwork(pid int) (func(), error) {
+	// veth の組を作って、片方 (名前は eth0) を pid の network namespace に入れる
+	// もう片方に、10.0.0.1/24 を設定して、有効にする
+	// 後片付け用の関数 (ホスト側の veth を削除する) を返す
+}
+
+// setupContainerNetwork は、子が呼ぶ。
+func setupContainerNetwork() error {
+	// lo と eth0 を有効にする
+	// eth0 に、10.0.0.2/24 を設定する
 }
 ```
 
 `container.go` は、次のように変えます。
 
 ```diff title="container.go"
-+	if opts.net {
-+		flags |= /* network namespace を作るフラグ */
-+	}
++	// -net のときは、Cloneflags に network namespace を作るフラグを足す
  	cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: flags}
  
 -	return exitCode(cmd.Run())
++	// 親が準備を終えるまで子を待たせるための、パイプを作る
++	// (読む側を cmd.ExtraFiles で子に渡す。子ではファイルディスクリプタ 3 になる)
++	// cmd.Run ではなく cmd.Start で子を起動して、親は読む側を閉じる
++	// -net のときは、cmd.Process.Pid を使って setupHostNetwork を呼ぶ
++	//   (失敗したら、子を Kill して Wait してから、エラーを返す)
++	//   (返された後片付け用の関数は、defer で呼ぶ)
++	// パイプの書く側を閉じて、子に準備完了を知らせる
++	// cmd.Wait で終了を待って、結果を exitCode に渡して返す
+ }
+ 
+ func child(opts options) error {
++	// ファイルディスクリプタ 3 のパイプが閉じるまで、読み続ける
++	// -net のときは、setupContainerNetwork を呼ぶ
++
+```
+
+実装できたら、`go build -o container .` でビルドが通ることを確認してください。
+
+<details>
+<summary>ヒント 1</summary>
+
+`ip link add vethXXXX type veth peer name eth0 netns <PID>` というコマンドで、veth の組を作って、片方を指定した PID の namespace に、同時に入れられます。
+
+パイプは `os.Pipe()` で作ります。読む側を `cmd.ExtraFiles` に渡すと、子ではファイルディスクリプタの 3 番になります (0、1、2 番は標準入出力なので、追加で渡したファイルは 3 番になります)。子は、これを書く側が閉じるまで (`io.Copy` などで) 読み続けます。
+
+</details>
+
+<details>
+<summary>ヒント 2</summary>
+
+実際の差分です。`+` の行を足して、`-` の行を消します。新しく作るファイルは、全文を載せています。
+
+```diff title="container.go"
+--- a/container.go
++++ b/container.go
+@@ -1,6 +1,7 @@
+ package main
+ 
+ import (
++	"io"
+ 	"os"
+ 	"os/exec"
+ 	"syscall"
+@@ -28,6 +29,10 @@
+ 	flags := uintptr(syscall.CLONE_NEWPID)
+ 	// mount namespace: マウントを分ける。
+ 	flags |= syscall.CLONE_NEWNS
++	if opts.net {
++		// network namespace: ネットワークを分ける。
++		flags |= syscall.CLONE_NEWNET
++	}
+ 	cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: flags}
+ 	if cg != nil {
+ 		// 子プロセスを、最初から cgroup の中で起動する。
+@@ -44,12 +49,50 @@
+ 		cmd.SysProcAttr.Credential = &syscall.Credential{Uid: 0, Gid: 0, NoSetGroups: true}
+ 	}
+ 
+-	return exitCode(cmd.Run())
++	// 親がネットワークの準備を終えるまで、子はこのパイプで待つ。
 +	syncR, syncW, err := os.Pipe()
 +	if err != nil {
 +		return 1, err
 +	}
++	defer syncW.Close()
 +	cmd.ExtraFiles = []*os.File{syncR}
++
++	// 子を起動する。
 +	if err := cmd.Start(); err != nil {
 +		return 1, err
 +	}
++	// 親は、パイプの読む側を使わないので閉じる。
 +	syncR.Close()
++
 +	if opts.net {
-+		// cmd.Process.Pid を使って、setupHostNetwork を呼ぶ
++		// 親の側のネットワークを準備する。
++		cleanup, err := setupHostNetwork(cmd.Process.Pid)
++		if err != nil {
++			cmd.Process.Kill()
++			cmd.Wait()
++			return 1, err
++		}
++		defer cleanup()
 +	}
-+	syncW.Close() // 閉じて、子に準備完了を知らせる
++	// パイプを閉じて、子に準備が終わったことを知らせる。
++	syncW.Close()
++
 +	return exitCode(cmd.Wait())
  }
  
+ // child は "container child" で実行される。新しい namespace の中で動く。
+ // コンテナの準備を終えて、最後に、自分を指定されたコマンドに置き換える。
  func child(opts options) error {
-+	// ファイルディスクリプタ 3 のパイプが閉じるまで読む
++	// 親のネットワークの準備が終わる (パイプが閉じられる) まで待つ。
++	if _, err := io.Copy(io.Discard, os.NewFile(3, "sync")); err != nil {
++		return err
++	}
 +	if opts.net {
-+		// setupContainerNetwork を呼ぶ
++		if err := setupContainerNetwork(); err != nil {
++			return err
++		}
 +	}
 +
+ 	// / を rootfs に差し替える。
+ 	if opts.rootfs != "" {
+ 		if err := setupRootfs(opts.rootfs); err != nil {
+```
+
+```go title="network.go"
+package main
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"strconv"
+)
+
+const (
+	hostAddr      = "10.0.0.1/24"
+	containerAddr = "10.0.0.2/24"
+)
+
+// ip は、ip コマンドを args つきで実行する。
+func ip(args ...string) error {
+	cmd := exec.Command("ip", args...)
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("ip %v: %w", args, err)
+	}
+	return nil
+}
+
+// setupHostNetwork は、親が呼ぶ。veth の組を作って、片方 (名前は eth0) を
+// プロセス pid の network namespace に入れて、もう片方を設定する。
+// 返される関数は、ホスト側の veth を削除する。
+func setupHostNetwork(pid int) (func(), error) {
+	// veth の組を作る。片方は、最初から子の network namespace に入れてしまう。
+	veth := fmt.Sprintf("veth%d", pid)
+	if err := ip("link", "add", veth, "type", "veth", "peer", "name", "eth0", "netns", strconv.Itoa(pid)); err != nil {
+		return nil, err
+	}
+	cleanup := func() { _ = exec.Command("ip", "link", "del", veth).Run() }
+	// ホスト側の端に、IP アドレスを設定して有効にする。
+	if err := ip("addr", "add", hostAddr, "dev", veth); err != nil {
+		cleanup()
+		return nil, err
+	}
+	if err := ip("link", "set", veth, "up"); err != nil {
+		cleanup()
+		return nil, err
+	}
+	return cleanup, nil
+}
+
+// setupContainerNetwork は、子が呼ぶ。新しい network namespace の中の lo と eth0 を設定する。
+func setupContainerNetwork() error {
+	// lo と eth0 を有効にして、eth0 に IP アドレスを設定する。
+	for _, args := range [][]string{
+		{"link", "set", "lo", "up"},
+		{"addr", "add", containerAddr, "dev", "eth0"},
+		{"link", "set", "eth0", "up"},
+	} {
+		if err := ip(args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 ```
 
 </details>
@@ -127,7 +277,6 @@ func ip(args ...string) error {
 package main
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -154,8 +303,6 @@ func run(opts options) (int, error) {
 	// clone のフラグ。作りたい namespace を、ここに足していく。
 	// まずは PID namespace。
 	flags := uintptr(syscall.CLONE_NEWPID)
-	// UTS namespace: ホスト名を分ける。
-	flags |= syscall.CLONE_NEWUTS
 	// mount namespace: マウントを分ける。
 	flags |= syscall.CLONE_NEWNS
 	if opts.net {
@@ -219,13 +366,6 @@ func child(opts options) error {
 	if opts.net {
 		if err := setupContainerNetwork(); err != nil {
 			return err
-		}
-	}
-
-	// コンテナだけのホスト名を設定する。
-	if opts.hostname != "" {
-		if err := syscall.Sethostname([]byte(opts.hostname)); err != nil {
-			return fmt.Errorf("set hostname: %w", err)
 		}
 	}
 
@@ -320,15 +460,15 @@ sudo ./container.test -test.v -test.count=1 -test.run '^TestStep[0-5]_'
 === RUN   TestStep0_RunsCommand
 --- PASS: TestStep0_RunsCommand (0.01s)
 === RUN   TestStep0_ReturnsExitCode
---- PASS: TestStep0_ReturnsExitCode (0.01s)
+--- PASS: TestStep0_ReturnsExitCode (0.02s)
 === RUN   TestStep1_ProcessIsPID1
 --- PASS: TestStep1_ProcessIsPID1 (0.01s)
 === RUN   TestStep2_RootfsIsAlpine
---- PASS: TestStep2_RootfsIsAlpine (0.01s)
+--- PASS: TestStep2_RootfsIsAlpine (0.02s)
 === RUN   TestStep3_MemoryLimitKillsProcess
 --- PASS: TestStep3_MemoryLimitKillsProcess (0.16s)
 === RUN   TestStep3_ProcessUnderLimitSucceeds
---- PASS: TestStep3_ProcessUnderLimitSucceeds (0.01s)
+--- PASS: TestStep3_ProcessUnderLimitSucceeds (0.00s)
 === RUN   TestStep3_CgroupIsRemoved
 --- PASS: TestStep3_CgroupIsRemoved (0.01s)
 === RUN   TestStep4_RootIsMappedToUnprivilegedID
@@ -336,9 +476,9 @@ sudo ./container.test -test.v -test.count=1 -test.run '^TestStep[0-5]_'
 === RUN   TestStep4_FilesAreOwnedByMappedID
 --- PASS: TestStep4_FilesAreOwnedByMappedID (0.01s)
 === RUN   TestStep5_OnlyOwnInterfacesVisible
---- PASS: TestStep5_OnlyOwnInterfacesVisible (0.08s)
+--- PASS: TestStep5_OnlyOwnInterfacesVisible (0.03s)
 === RUN   TestStep5_CanReachHost
---- PASS: TestStep5_CanReachHost (0.05s)
+--- PASS: TestStep5_CanReachHost (0.02s)
 PASS
 ```
 
@@ -359,6 +499,16 @@ $ sudo ./container run -rootfs rootfs -net sleep 30 &
 $ ip -br addr | grep veth
 veth19@if2       UP             10.0.0.1/24 fe80::ec0e:dfff:fef7:5671/64 
 ```
+
+## うまくいかないとき
+
+`ip` コマンドが見つからないと、veth を作る処理で失敗します。Dev Container には入っているので、普通は起きません。
+
+```text
+error: ip [link add veth18 type veth peer name eth0 netns 18]: exec: "ip": executable file not found in $PATH
+```
+
+`ping` が通らないときは、親が `setupHostNetwork` を呼んだ後に、パイプを閉じているかを確認してください。パイプを先に閉じてしまうと、子が、veth の準備を待たずに進んでしまいます。
 
 ## まだ隔離できていないもの
 

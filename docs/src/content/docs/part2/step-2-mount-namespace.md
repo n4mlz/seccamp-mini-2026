@@ -19,17 +19,54 @@ VERSION_ID=3.20.10
 
 ## 説明
 
-コンテナの中で動いているプログラムが見ているファイルシステムは、ホストのものではなく、コンテナイメージに入っていたファイルの集まりです。この集まりを rootfs と呼びます。Alpine Linux や Ubuntu といったディストリビューションのファイル一式 (`/bin`、`/etc`、`/usr` など) から、Linux カーネルを除いたものだと考えてください。[環境構築](../setup/)で用意した `rootfs` ディレクトリが、まさにこれです。
+コンテナの中で動いているプログラムが見ているファイルシステムは、ホストのものではなく、コンテナイメージに入っていたファイルの集まりです。この集まりを rootfs と呼びます。Alpine Linux や Ubuntu といったディストリビューションのファイル一式 (`/bin`、`/etc`、`/usr` など) を「環境」としてまとめたものだと考えてください。[環境構築](../setup/)で用意した `rootfs` ディレクトリが、まさにこれです。
 
-プロセスから見える `/` を差し替えるのが、`chroot` システムコールです。`chroot("rootfs")` を呼ぶと、そのプロセスにとっての `/` が `rootfs` ディレクトリになります。
+このステップで足すのは、図の「追加」の部分です。
 
-もう1つ、mount namespace も使います。これは、ファイルシステムのマウント (どのディスクやファイルシステムが、どのディレクトリに見えているか) をプロセスごとに分ける仕組みで、`CLONE_NEWNS` というフラグで作ります。このステップではまだマウントをしないのですが、(発展) で必要になるので、一緒に用意しておきます。
+```mermaid
+flowchart LR
+    R["run"] -->|"CLONE_NEWNS を足して clone (追加)"| C["child"] -->|"chroot (追加)<br/>/ が rootfs になる"| X["指定したコマンド"]
+```
+
+プロセスから見える `/` を差し替えるのが、`chroot` システムコールです。`chroot("rootfs")` を呼ぶと、そのプロセスにとっての `/` が `rootfs` ディレクトリになり、例えばそのプロセスにとっての `/abc/def` が実際には `rootfs/abc/def` を指すことになります。
+
+もう1つ、mount namespace も使います。これは、ファイルシステムのマウント (どのディスクやファイルシステムが、どのディレクトリに見えているか) をプロセスごとに分ける仕組みで、`CLONE_NEWNS` というフラグで作ります。このステップではまだマウントをしないのですが、(発展) で必要になるので、一応用意しておきます。
 
 ## 手順
 
 `rootfs.go` を新しく作って、`setupRootfs(rootfs string) error` を実装します。`syscall.Chroot` で `/` を差し替えて、作業ディレクトリも `/` に移します。そして `container.go` で、`Cloneflags` に `CLONE_NEWNS` を足して、`child` の中で、`-rootfs` が指定されていれば `setupRootfs` を呼びます。
 
 `chroot` した後も、カレントディレクトリは元の場所のままなので、`os.Chdir("/")` を忘れないようにしてください。
+
+次の雛形の、コメントで示した場所に実装を書きます。`-` の行は消してください。
+
+`rootfs.go` は、新しく作るファイルです。
+
+```go title="rootfs.go"
+package main
+
+// setupRootfs は、/ を rootfs に差し替える。
+func setupRootfs(rootfs string) error {
+	// rootfs を、新しい / にする
+	// 作業ディレクトリを、新しい / に移す
+}
+```
+
+`container.go` は、次のように変えます。
+
+```diff title="container.go"
+ 	flags := uintptr(syscall.CLONE_NEWPID)
++	// mount namespace を作るフラグを足す
+ 	cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: flags}
+ 
+ func child(opts options) error {
++	// -rootfs が指定されていれば、setupRootfs を呼ぶ
++	// (exec する前、exec.LookPath でコマンドを探す前に呼ぶ)
++
+ 	path, err := exec.LookPath(opts.cmd[0])
+```
+
+実装できたら、`go build -o container .` でビルドが通ることを確認してください。
 
 <details>
 <summary>ヒント 1</summary>
@@ -43,7 +80,35 @@ VERSION_ID=3.20.10
 <details>
 <summary>ヒント 2</summary>
 
-`rootfs.go` は、新しく作るファイルです。
+実際の差分です。`+` の行を足して、`-` の行を消します。新しく作るファイルは、全文を載せています。
+
+```diff title="container.go"
+--- a/container.go
++++ b/container.go
+@@ -17,6 +17,8 @@
+ 	// clone のフラグ。作りたい namespace を、ここに足していく。
+ 	// まずは PID namespace。
+ 	flags := uintptr(syscall.CLONE_NEWPID)
++	// mount namespace: マウントを分ける。
++	flags |= syscall.CLONE_NEWNS
+ 	cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: flags}
+ 
+ 	return exitCode(cmd.Run())
+@@ -25,6 +27,13 @@
+ // child は "container child" で実行される。新しい namespace の中で動く。
+ // コンテナの準備を終えて、最後に、自分を指定されたコマンドに置き換える。
+ func child(opts options) error {
++	// / を rootfs に差し替える。
++	if opts.rootfs != "" {
++		if err := setupRootfs(opts.rootfs); err != nil {
++			return err
++		}
++	}
++
+ 	// コマンドの場所を探して、自分をそのコマンドに置き換える (成功すると戻ってこない)。
+ 	path, err := exec.LookPath(opts.cmd[0])
+ 	if err != nil {
+```
 
 ```go title="rootfs.go"
 package main
@@ -54,29 +119,15 @@ import (
 	"syscall"
 )
 
+// setupRootfs は、rootfs をコンテナの / にする。
 func setupRootfs(rootfs string) error {
-	if err := syscall.Chroot( /* 新しい / */ ); err != nil {
+	// / を rootfs に差し替える。
+	if err := syscall.Chroot(rootfs); err != nil {
 		return fmt.Errorf("chroot: %w", err)
 	}
-	return os.Chdir( /* 新しい / の中の作業ディレクトリ */ )
+	// chroot しても、カレントディレクトリは元の場所のままなので、新しい / に移す。
+	return os.Chdir("/")
 }
-```
-
-`container.go` は、次のように変えます。
-
-```diff title="container.go"
- 	flags := uintptr(syscall.CLONE_NEWPID)
-+	flags |= /* mount namespace を作るフラグ */
- 	cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: flags}
- 
- func child(opts options) error {
-+	if opts.rootfs != "" {
-+		if err := setupRootfs(opts.rootfs); err != nil {
-+			return err
-+		}
-+	}
-+
- 	path, err := exec.LookPath(opts.cmd[0])
 ```
 
 </details>
@@ -88,7 +139,6 @@ func setupRootfs(rootfs string) error {
 package main
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"syscall"
@@ -105,8 +155,6 @@ func run(opts options) (int, error) {
 	// clone のフラグ。作りたい namespace を、ここに足していく。
 	// まずは PID namespace。
 	flags := uintptr(syscall.CLONE_NEWPID)
-	// UTS namespace: ホスト名を分ける。
-	flags |= syscall.CLONE_NEWUTS
 	// mount namespace: マウントを分ける。
 	flags |= syscall.CLONE_NEWNS
 	cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: flags}
@@ -117,13 +165,6 @@ func run(opts options) (int, error) {
 // child は "container child" で実行される。新しい namespace の中で動く。
 // コンテナの準備を終えて、最後に、自分を指定されたコマンドに置き換える。
 func child(opts options) error {
-	// コンテナだけのホスト名を設定する。
-	if opts.hostname != "" {
-		if err := syscall.Sethostname([]byte(opts.hostname)); err != nil {
-			return fmt.Errorf("set hostname: %w", err)
-		}
-	}
-
 	// / を rootfs に差し替える。
 	if opts.rootfs != "" {
 		if err := setupRootfs(opts.rootfs); err != nil {
@@ -199,6 +240,26 @@ ID=alpine
 
 最初の `can't access tty` というメッセージは、気にしなくて大丈夫です。`/ #` というプロンプトは Alpine Linux の `sh` のもので、ホストのシェルとは別物であることが分かります。
 
+## うまくいかないとき
+
+`-rootfs` に指定したディレクトリが見つからないと、`chroot` で失敗します。
+
+```text
+$ sudo ./container run -rootfs nosuch echo hi
+error: chroot: no such file or directory
+```
+
+`make rootfs` を実行したか、渡したパスが合っているかを確認してください。
+
+`rootfs` が空のディレクトリだと、コマンドが見つかりません。
+
+```text
+$ mkdir /tmp/empty && sudo ./container run -rootfs /tmp/empty echo hi
+error: exec: "echo": executable file not found in $PATH
+```
+
+`ls rootfs` で、`bin` や `etc` などが入っているかを確認します。
+
 ## まだ隔離できていないもの
 
 ホストのファイルは見えなくなったので、別の悪用を考えてみます。ホストのメモリを使い切ってしまうのはどうでしょうか。次のコマンドは、シェルの変数を倍々に増やしていって、約 256 MB のメモリを使います。
@@ -233,7 +294,7 @@ PID   USER     TIME  COMMAND
 
 `rootfs` の中の `/proc` は空のディレクトリで、何もマウントされていないからです。
 
-`/proc` には、`proc` というファイルシステムをマウントします。PID namespace の中でマウントした `proc` には、その namespace のプロセスだけが見えます。`/dev/null` や `/dev/zero` といったデバイスファイルも、同じようにホストのものを bind マウントして使えるようにします。
+`/proc` には、`proc` というファイルシステムをマウントします。PID namespace の中でマウントした `proc` には、その namespace のプロセスだけが見えます。`/dev/null` や `/dev/zero` といったデバイスファイルも、同じようにホストのものを、bind マウント (ディレクトリやファイルを、別の場所にも見えるようにするマウント) して使えるようにします。
 
 さらに、`chroot` を `pivot_root` に置き換えます。`chroot` は、プロセスから見える `/` を変えるだけで、元のファイルシステムはマウントされたままなので、権限を持つプロセスなら抜け出せることが知られています。`pivot_root` はルートファイルシステムそのものを入れ替えるので、その後で古いルートをアンマウントすれば、ホストのファイルシステムは完全に見えなくなります。
 

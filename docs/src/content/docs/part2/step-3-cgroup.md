@@ -19,6 +19,16 @@ $ echo $?
 
 ここまでの namespace は、プロセスから見える世界を分けるものでした。それに対して cgroup (control group) は、プロセスが使える資源の量を制限する仕組みで、namespace とは別の種類の隔離です。
 
+このステップで足すのは、図の「追加」の部分です。
+
+```mermaid
+flowchart LR
+    G["cgroup<br/>memory.max に上限を書く (追加)"]
+    R["run"] -->|"cgroup の中で clone (追加)"| C["child"] -->|exec| X["指定したコマンド<br/>メモリに上限がかかる"]
+    R -. 作る .-> G
+    C -. 所属する .-> G
+```
+
 cgroup はファイルシステムとして操作します。`/sys/fs/cgroup` の下にディレクトリを作ると、それが1つの cgroup になって、その中に、上限を書き込むためのファイルが自動で現れます。メモリの上限なら `memory.max` です。
 
 ```text
@@ -37,19 +47,7 @@ pids.max
 
 そして `container.go` の `run` で、その cgroup のディレクトリを `SysProcAttr` に指定して、子プロセスが最初から cgroup の中で動くようにします。
 
-<details>
-<summary>ヒント 1</summary>
-
-`os.Mkdir` で cgroup のディレクトリを作って、`memory.max` というファイルに、上限を文字列で書き込みます。`os.OpenFile(path, os.O_WRONLY, 0)` で開いて、`WriteString` します。
-
-ディレクトリを `os.Open` して、その `Fd()` を `SysProcAttr.CgroupFD` に渡して、`UseCgroupFD` を `true` にすると、子プロセスが最初から cgroup の中で起動します。
-
-cgroup のディレクトリは、中のプロセスが全て終了してからでないと削除できません。`run` の最後で、`defer` で後片付けをします。
-
-</details>
-
-<details>
-<summary>ヒント 2</summary>
+次の雛形の、コメントで示した場所に実装を書きます。`-` の行は消してください。
 
 `cgroup.go` は、新しく作るファイルで、骨組みは次のようになります。
 
@@ -80,6 +78,41 @@ func (cg *cgroup) Close() {
 
 ```diff title="container.go"
  func run(opts options) (int, error) {
++	// cgroup を作る (-memory が無ければ、作られない)
++	// 終わったら、Close で後片付けをする
++
+ 	cmd := exec.Command("/proc/self/exe", append([]string{"child"}, os.Args[2:]...)...)
+ 
+ 	cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: flags}
++	// cgroup があれば、子プロセスを最初から cgroup の中で起動するように、SysProcAttr に指定する
+```
+
+実装できたら、`go build -o container .` でビルドが通ることを確認してください。
+
+<details>
+<summary>ヒント 1</summary>
+
+`os.Mkdir` で cgroup のディレクトリを作って、`memory.max` というファイルに、上限を文字列で書き込みます。`os.OpenFile(path, os.O_WRONLY, 0)` で開いて、`WriteString` します。
+
+ディレクトリを `os.Open` して、その `Fd()` (ファイルディスクリプタ。開いているファイルやディレクトリを指す番号です) を `SysProcAttr.CgroupFD` に渡して、`UseCgroupFD` を `true` にすると、子プロセスが最初から cgroup の中で起動します。
+
+cgroup のディレクトリは、中のプロセスが全て終了してからでないと削除できません。`run` の最後で、`defer` で後片付けをします。
+
+</details>
+
+<details>
+<summary>ヒント 2</summary>
+
+実際の差分です。`+` の行を足して、`-` の行を消します。新しく作るファイルは、全文を載せています。
+
+```diff title="container.go"
+--- a/container.go
++++ b/container.go
+@@ -9,6 +9,15 @@
+ // run は "container run" で実行される。
+ // コンテナを起動して、その終了を待ち、コンテナの終了コードを返す。
+ func run(opts options) (int, error) {
++	// 資源の制限が指定されていれば、cgroup を作る。
 +	cg, err := newCgroup(opts)
 +	if err != nil {
 +		return 1, err
@@ -88,13 +121,114 @@ func (cg *cgroup) Close() {
 +		defer cg.Close()
 +	}
 +
+ 	// 自分自身を "child" サブコマンドで再実行して、新しい namespace の中で動かす。
  	cmd := exec.Command("/proc/self/exe", append([]string{"child"}, os.Args[2:]...)...)
- 
+ 	// 標準入出力は、そのまま引き継ぐ。
+@@ -20,6 +29,11 @@
+ 	// mount namespace: マウントを分ける。
+ 	flags |= syscall.CLONE_NEWNS
  	cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: flags}
 +	if cg != nil {
++		// 子プロセスを、最初から cgroup の中で起動する。
 +		cmd.SysProcAttr.UseCgroupFD = true
 +		cmd.SysProcAttr.CgroupFD = int(cg.dir.Fd())
 +	}
+ 
+ 	return exitCode(cmd.Run())
+ }
+```
+
+```go title="cgroup.go"
+package main
+
+import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strconv"
+	"time"
+)
+
+const cgroupRoot = "/sys/fs/cgroup"
+
+// cgroup は、コンテナが使える資源を制限する cgroup v2 のディレクトリ。
+type cgroup struct {
+	path string
+	dir  *os.File // 子プロセスを、直接この中で起動できるように、開いたままにしておく
+}
+
+// newCgroup は、opts に従って設定した cgroup を作る。
+// 制限が何も指定されていなければ、nil を返す。
+func newCgroup(opts options) (*cgroup, error) {
+	if opts.memoryMB == 0 {
+		return nil, nil
+	}
+
+	// 上限を書くファイルが現れるように、親の cgroup で controller を有効にしておく。
+	// Dev Container ではすでに有効なので、失敗しても構わない (念のための処理)。
+	_ = os.WriteFile(filepath.Join(cgroupRoot, "cgroup.subtree_control"), []byte("+memory +pids +cpu"), 0o644)
+
+	// cgroup は、ディレクトリを作るだけで作れる。
+	path := filepath.Join(cgroupRoot, fmt.Sprintf("container-%d", os.Getpid()))
+	if err := os.Mkdir(path, 0o755); err != nil {
+		return nil, fmt.Errorf("create cgroup: %w", err)
+	}
+	cg := &cgroup{path: path}
+	if err := cg.configure(opts); err != nil {
+		cg.Close()
+		return nil, err
+	}
+	// 子プロセスを直接 cgroup の中で起動できるように、ディレクトリを開いておく。
+	dir, err := os.Open(path)
+	if err != nil {
+		cg.Close()
+		return nil, err
+	}
+	cg.dir = dir
+	return cg, nil
+}
+
+func (cg *cgroup) configure(opts options) error {
+	if opts.memoryMB > 0 {
+		// メモリの上限 (バイト単位)。
+		if err := cg.write("memory.max", strconv.Itoa(opts.memoryMB<<20)); err != nil {
+			return err
+		}
+		// スワップに逃げられないようにする。上限を超えると、すぐに OOM killer が動く。
+		if err := cg.write("memory.swap.max", "0"); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+// write は、cgroup の制御用ファイルに value を書き込む。
+func (cg *cgroup) write(name, value string) error {
+	f, err := os.OpenFile(filepath.Join(cg.path, name), os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if _, err := f.WriteString(value); err != nil {
+		return fmt.Errorf("write %s: %w", name, err)
+	}
+	return nil
+}
+
+// Close は、cgroup を削除する。中のプロセスが全て終了するまでは、削除できない。
+func (cg *cgroup) Close() {
+	if cg.dir != nil {
+		cg.dir.Close()
+	}
+	for i := 0; i < 50; i++ {
+		if err := os.Remove(cg.path); err == nil || errors.Is(err, fs.ErrNotExist) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
 ```
 
 </details>
@@ -106,7 +240,6 @@ func (cg *cgroup) Close() {
 package main
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"syscall"
@@ -132,8 +265,6 @@ func run(opts options) (int, error) {
 	// clone のフラグ。作りたい namespace を、ここに足していく。
 	// まずは PID namespace。
 	flags := uintptr(syscall.CLONE_NEWPID)
-	// UTS namespace: ホスト名を分ける。
-	flags |= syscall.CLONE_NEWUTS
 	// mount namespace: マウントを分ける。
 	flags |= syscall.CLONE_NEWNS
 	cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: flags}
@@ -149,13 +280,6 @@ func run(opts options) (int, error) {
 // child は "container child" で実行される。新しい namespace の中で動く。
 // コンテナの準備を終えて、最後に、自分を指定されたコマンドに置き換える。
 func child(opts options) error {
-	// コンテナだけのホスト名を設定する。
-	if opts.hostname != "" {
-		if err := syscall.Sethostname([]byte(opts.hostname)); err != nil {
-			return fmt.Errorf("set hostname: %w", err)
-		}
-	}
-
 	// / を rootfs に差し替える。
 	if opts.rootfs != "" {
 		if err := setupRootfs(opts.rootfs); err != nil {
@@ -288,7 +412,7 @@ sudo ./container.test -test.v -test.count=1 -test.run '^TestStep[0-3]_'
 === RUN   TestStep2_RootfsIsAlpine
 --- PASS: TestStep2_RootfsIsAlpine (0.01s)
 === RUN   TestStep3_MemoryLimitKillsProcess
---- PASS: TestStep3_MemoryLimitKillsProcess (0.13s)
+--- PASS: TestStep3_MemoryLimitKillsProcess (0.09s)
 === RUN   TestStep3_ProcessUnderLimitSucceeds
 --- PASS: TestStep3_ProcessUnderLimitSucceeds (0.01s)
 === RUN   TestStep3_CgroupIsRemoved
@@ -305,7 +429,7 @@ $ sudo ./container run -rootfs rootfs -memory 64 echo ok
 ok
 ```
 
-上限を超えてメモリを使い続けるコマンドは、強制終了されます。終了コードの `137` は `128 + 9` で、`SIGKILL` で終了させられたことを表します。
+上限を超えてメモリを使い続けるコマンドは、強制終了されます[^2]。終了コードの `137` は `128 + 9` で、`SIGKILL` で終了させられたことを表します。
 
 ```text
 $ sudo ./container run -rootfs rootfs -memory 32 sh -c 'x=aaaaaaaaaaaaaaaa; while true; do x="$x$x"; done'
@@ -322,6 +446,17 @@ $ cat /sys/fs/cgroup/container-*/memory.max
 ```
 
 終了すれば、cgroup のディレクトリは削除されます。
+
+## うまくいかないとき
+
+`sudo` を付け忘れると、cgroup のディレクトリを作れません。
+
+```text
+$ ./container run -rootfs rootfs -memory 32 echo hi
+error: create cgroup: mkdir /sys/fs/cgroup/container-11: permission denied
+```
+
+`memory.max` に関するエラーが出る場合は、[トラブルシューティング](../troubleshooting/)を見てください。
 
 ## まだ隔離できていないもの
 
@@ -469,7 +604,7 @@ go build -o container .
 go test -c -o container.test .
 sudo ./container.test -test.v -test.count=1 -test.run '^TestExtra3_'
 === RUN   TestExtra3_PidsLimit
---- PASS: TestExtra3_PidsLimit (0.03s)
+--- PASS: TestExtra3_PidsLimit (0.01s)
 === RUN   TestExtra3_CpuLimit
 --- PASS: TestExtra3_CpuLimit (0.10s)
 PASS
@@ -479,3 +614,5 @@ PASS
 $ sudo ./container run -rootfs rootfs -pids 20 sh -c 'for i in $(seq 30); do sleep 1 & done; wait'
 sh: can't fork: Resource temporarily unavailable
 ```
+
+[^2]: メモリが足りなくなったときに、カーネルがプロセスを強制終了して、メモリを空ける仕組みを OOM (Out Of Memory) killer と呼びます。cgroup の上限を超えたときにも、この仕組みが働きます。

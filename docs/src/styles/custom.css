@@ -1,0 +1,12 @@
+/* 本文中の見出しを、デフォルトより小さくする。 */
+:root {
+	--sl-text-h2: var(--sl-text-2xl);
+	--sl-text-h3: var(--sl-text-xl);
+}
+
+@media (min-width: 50em) {
+	:root {
+		--sl-text-h2: var(--sl-text-2xl);
+		--sl-text-h3: var(--sl-text-xl);
+	}
+}

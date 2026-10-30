@@ -20,6 +20,13 @@ unshare: unshare(0x4000000): Operation not permitted
 
 ### capability
 
+このステップで足すのは、図の「追加」の部分です。
+
+```mermaid
+flowchart LR
+    R["run"] -->|clone| C["child"] -->|"capability を絞る (追加)<br/>seccomp を設定する (追加)"| E["exec"] --> X["指定したコマンド<br/>権限と使えるシステムコールが制限される"]
+```
+
 Linux では、`root` が持つ「何でもできる」権限が、細かい単位に分けられています。この1つ1つを capability と呼びます。例えば、マウントする権限 (`CAP_SYS_ADMIN`)、ファイルの持ち主を変える権限 (`CAP_CHOWN`)、ネットワークの設定を変える権限 (`CAP_NET_ADMIN`) などです。
 
 ここまでのコンテナの中の `root` は、全ての capability を持っていました。ステップ 4 の user namespace のおかげで、その権限がホストには及ばなくなっていますが、コンテナの中では強力なままです。普通のアプリケーションには要らない capability は、取り上げてしまいましょう。
@@ -38,6 +45,42 @@ capability が「何をする権限があるか」の制限なら、seccomp は�
 
 capability と seccomp の設定は、スレッド単位のものです。Go のプログラムは複数のスレッドで動いているので、`child` の最初で `runtime.LockOSThread()` を呼んで、設定と `exec` が同じスレッドで行われるようにします。
 
+`security.go` は、新しく作るファイルです。
+
+```go title="security.go"
+package main
+
+// dropCapabilities は、残す capability 以外を bounding set から外して、
+// 自分自身の capability も同じ集合に絞る。
+func dropCapabilities() error {
+	// bounding set から、残す capability 以外を外す
+	// 自分自身の capability も、同じ集合に絞る
+}
+
+// applySeccomp は、禁止するシステムコールを EPERM で失敗させるフィルタを設定する。
+func applySeccomp() error {
+	// 禁止するシステムコールを EPERM で失敗させる、BPF のフィルタを作る
+	// フィルタを、seccomp として設定する
+}
+```
+
+`container.go` の `child` は、次のように変えます。`...` は、これまでに書いた部分がそのまま続くという意味です。
+
+```diff title="container.go"
+ func child(opts options) error {
++	// 最初に runtime.LockOSThread() を呼ぶ
++
+ 	...
++	// -drop-caps のときは、dropCapabilities を呼ぶ
++	// -seccomp のときは、applySeccomp を呼ぶ
++
+ 	path, err := exec.LookPath(opts.cmd[0])
+```
+
+seccomp のフィルタは、次の流れで判定します。まずシステムコールの番号を読み込んで、禁止リストの1つ1つと比べます。一致したら「失敗させる」にジャンプして、どれにも一致しなければ「許可」します。
+
+実装できたら、`go build -o container .` でビルドが通ることを確認してください。
+
 <details>
 <summary>ヒント 1</summary>
 
@@ -50,11 +93,35 @@ bounding set から外すには、外したい capability ごとに `unix.Prctl(
 <details>
 <summary>ヒント 2</summary>
 
+実際の差分です。`+` の行を足して、`-` の行を消します。新しく作るファイルは、全文を載せています。
+
 ```diff title="container.go"
+--- a/container.go
++++ b/container.go
+@@ -4,6 +4,7 @@
+ 	"io"
+ 	"os"
+ 	"os/exec"
++	"runtime"
+ 	"syscall"
+ )
+ 
+@@ -83,6 +84,10 @@
+ // child は "container child" で実行される。新しい namespace の中で動く。
+ // コンテナの準備を終えて、最後に、自分を指定されたコマンドに置き換える。
  func child(opts options) error {
++	// capability と seccomp は、スレッド単位の設定。
++	// コマンドを exec するまで、同じ OS スレッドで動き続けるようにする。
 +	runtime.LockOSThread()
 +
- 	...
+ 	// 親のネットワークの準備が終わる (パイプが閉じられる) まで待つ。
+ 	if _, err := io.Copy(io.Discard, os.NewFile(3, "sync")); err != nil {
+ 		return err
+@@ -100,6 +105,18 @@
+ 		}
+ 	}
+ 
++	// 権限と、呼び出せるシステムコールを絞る。
 +	if opts.dropCaps {
 +		if err := dropCapabilities(); err != nil {
 +			return err
@@ -66,10 +133,128 @@ bounding set から外すには、外したい capability ごとに `unix.Prctl(
 +		}
 +	}
 +
+ 	// コマンドの場所を探して、自分をそのコマンドに置き換える (成功すると戻ってこない)。
  	path, err := exec.LookPath(opts.cmd[0])
+ 	if err != nil {
 ```
 
-seccomp のフィルタは、次の流れで判定します。まずシステムコールの番号を読み込んで、禁止リストの1つ1つと比べます。一致したら「失敗させる」にジャンプして、どれにも一致しなければ「許可」します。
+```go title="security.go"
+package main
+
+import (
+	"fmt"
+	"runtime"
+	"unsafe"
+
+	"golang.org/x/sys/unix"
+)
+
+// keepCaps は、コンテナの中に残す capability。これ以外は、全て取り上げる。
+var keepCaps = []int{
+	unix.CAP_CHOWN, unix.CAP_DAC_OVERRIDE, unix.CAP_FOWNER, unix.CAP_FSETID,
+	unix.CAP_KILL, unix.CAP_SETGID, unix.CAP_SETUID, unix.CAP_SETPCAP,
+	unix.CAP_NET_BIND_SERVICE, unix.CAP_NET_RAW, unix.CAP_SYS_CHROOT,
+	unix.CAP_MKNOD, unix.CAP_AUDIT_WRITE, unix.CAP_SETFCAP,
+}
+
+// dropCapabilities は、呼び出したスレッドから、keepCaps 以外の capability を全て取り除く。
+func dropCapabilities() error {
+	var keep [2]uint32 // capability のビットマスク (32 ビットを2つ)
+	for _, c := range keepCaps {
+		keep[c/32] |= 1 << (c % 32)
+	}
+
+	// bounding set は、exec したコマンドが得られる capability の上限。ここから外す。
+	for c := 0; c <= unix.CAP_LAST_CAP; c++ {
+		if keep[c/32]&(1<<(c%32)) != 0 {
+			continue
+		}
+		if err := unix.Prctl(unix.PR_CAPBSET_DROP, uintptr(c), 0, 0, 0); err != nil && err != unix.EINVAL {
+			return fmt.Errorf("drop capability %d: %w", c, err)
+		}
+	}
+
+	// このスレッド自身の capability も絞る。inheritable が残っていると、
+	// root としてコマンドを exec したときに、外したはずの capability が戻ってくる。
+	hdr := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
+	data := [2]unix.CapUserData{
+		{Effective: keep[0], Permitted: keep[0], Inheritable: keep[0]},
+		{Effective: keep[1], Permitted: keep[1], Inheritable: keep[1]},
+	}
+	if err := unix.Capset(&hdr, &data[0]); err != nil {
+		return fmt.Errorf("capset: %w", err)
+	}
+	if err := unix.Prctl(unix.PR_CAP_AMBIENT, unix.PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0); err != nil {
+		return fmt.Errorf("clear ambient capabilities: %w", err)
+	}
+	return nil
+}
+
+const (
+	seccompRetKillProcess = 0x80000000
+	seccompRetErrno       = 0x00050000
+	seccompRetAllow       = 0x7fff0000
+)
+
+// blockedSyscalls は、EPERM で失敗させるシステムコール。
+// 普通のアプリケーションはほとんど使わないが、カーネルの攻撃対象を広げてしまうもの。
+var blockedSyscalls = []uint32{
+	unix.SYS_UNSHARE, unix.SYS_SETNS, unix.SYS_PTRACE, unix.SYS_REBOOT,
+	unix.SYS_KEXEC_LOAD, unix.SYS_INIT_MODULE, unix.SYS_FINIT_MODULE, unix.SYS_DELETE_MODULE,
+	unix.SYS_BPF, unix.SYS_PERF_EVENT_OPEN, unix.SYS_KEYCTL, unix.SYS_ADD_KEY, unix.SYS_REQUEST_KEY,
+}
+
+// auditArch は、このバイナリについて seccomp が報告する、アーキテクチャの番号を返す。
+func auditArch() (uint32, error) {
+	switch runtime.GOARCH {
+	case "amd64":
+		return 0xc000003e, nil // AUDIT_ARCH_X86_64
+	case "arm64":
+		return 0xc00000b7, nil // AUDIT_ARCH_AARCH64
+	}
+	return 0, fmt.Errorf("unsupported architecture: %s", runtime.GOARCH)
+}
+
+// applySeccomp は、blockedSyscalls を EPERM で失敗させるフィルタを設定する。
+// フィルタは呼び出したスレッドに適用されて、execve した後も残る。
+func applySeccomp() error {
+	arch, err := auditArch()
+	if err != nil {
+		return err
+	}
+	// これがないと、フィルタの設定に CAP_SYS_ADMIN が必要になる。
+	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
+		return fmt.Errorf("set no_new_privs: %w", err)
+	}
+
+	const (
+		load = unix.BPF_LD | unix.BPF_W | unix.BPF_ABS
+		jeq  = unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K
+		ret  = unix.BPF_RET | unix.BPF_K
+	)
+	n := len(blockedSyscalls)
+	filter := []unix.SockFilter{
+		{Code: load, K: 4},                    // seccomp_data.arch (アーキテクチャ)
+		{Code: jeq, K: arch, Jt: 1},           // 想定したアーキテクチャなら、次の行を飛ばす
+		{Code: ret, K: seccompRetKillProcess}, // 想定外のアーキテクチャなら、プロセスを終了させる
+		{Code: load, K: 0},                    // seccomp_data.nr (システムコールの番号)
+	}
+	for i, nr := range blockedSyscalls {
+		// 一致したら、残りの比較と「許可」の行を飛ばして、「拒否」の行に進む。
+		filter = append(filter, unix.SockFilter{Code: jeq, K: nr, Jt: uint8(n - i)})
+	}
+	filter = append(filter,
+		unix.SockFilter{Code: ret, K: seccompRetAllow},
+		unix.SockFilter{Code: ret, K: seccompRetErrno | uint32(unix.EPERM)},
+	)
+
+	prog := unix.SockFprog{Len: uint16(len(filter)), Filter: &filter[0]}
+	if err := unix.Prctl(unix.PR_SET_SECCOMP, unix.SECCOMP_MODE_FILTER, uintptr(unsafe.Pointer(&prog)), 0, 0); err != nil {
+		return fmt.Errorf("install seccomp filter: %w", err)
+	}
+	return nil
+}
+```
 
 </details>
 
@@ -80,7 +265,6 @@ seccomp のフィルタは、次の流れで判定します。まずシステム
 package main
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -108,8 +292,6 @@ func run(opts options) (int, error) {
 	// clone のフラグ。作りたい namespace を、ここに足していく。
 	// まずは PID namespace。
 	flags := uintptr(syscall.CLONE_NEWPID)
-	// UTS namespace: ホスト名を分ける。
-	flags |= syscall.CLONE_NEWUTS
 	// mount namespace: マウントを分ける。
 	flags |= syscall.CLONE_NEWNS
 	if opts.net {
@@ -177,13 +359,6 @@ func child(opts options) error {
 	if opts.net {
 		if err := setupContainerNetwork(); err != nil {
 			return err
-		}
-	}
-
-	// コンテナだけのホスト名を設定する。
-	if opts.hostname != "" {
-		if err := syscall.Sethostname([]byte(opts.hostname)); err != nil {
-			return fmt.Errorf("set hostname: %w", err)
 		}
 	}
 
@@ -352,11 +527,11 @@ sudo ./container.test -test.v -test.count=1 -test.run '^TestStep[0-6]_'
 === RUN   TestStep0_ReturnsExitCode
 --- PASS: TestStep0_ReturnsExitCode (0.01s)
 === RUN   TestStep1_ProcessIsPID1
---- PASS: TestStep1_ProcessIsPID1 (0.01s)
+--- PASS: TestStep1_ProcessIsPID1 (0.02s)
 === RUN   TestStep2_RootfsIsAlpine
 --- PASS: TestStep2_RootfsIsAlpine (0.01s)
 === RUN   TestStep3_MemoryLimitKillsProcess
---- PASS: TestStep3_MemoryLimitKillsProcess (0.11s)
+--- PASS: TestStep3_MemoryLimitKillsProcess (0.13s)
 === RUN   TestStep3_ProcessUnderLimitSucceeds
 --- PASS: TestStep3_ProcessUnderLimitSucceeds (0.01s)
 === RUN   TestStep3_CgroupIsRemoved
@@ -368,7 +543,7 @@ sudo ./container.test -test.v -test.count=1 -test.run '^TestStep[0-6]_'
 === RUN   TestStep5_OnlyOwnInterfacesVisible
 --- PASS: TestStep5_OnlyOwnInterfacesVisible (0.03s)
 === RUN   TestStep5_CanReachHost
---- PASS: TestStep5_CanReachHost (0.04s)
+--- PASS: TestStep5_CanReachHost (0.02s)
 === RUN   TestStep6_DropsCapabilities
 --- PASS: TestStep6_DropsCapabilities (0.01s)
 === RUN   TestStep6_SeccompBlocksSyscalls

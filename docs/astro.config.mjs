@@ -17,6 +17,7 @@ export default defineConfig({
 		mermaid({ autoTheme: true }),
 		starlight({
 			title: '作って学ぶLinuxコンテナの仕組みとセキュリティ',
+			customCss: ['./src/styles/custom.css'],
 			sidebar: [
 				{ label: '講義の概要', slug: 'overview' },
 				{
@@ -38,7 +39,7 @@ export default defineConfig({
 					],
 				},
 				{
-					label: '第2章 作って理解する',
+					label: '第2章 コンテナを自作してみる',
 					items: [
 						{ label: '1. プロセスとシステムコール', slug: 'part2/process-and-syscall' },
 						{ label: '2. ハンズオンの進め方', slug: 'part2/handson-guide' },
@@ -54,13 +55,12 @@ export default defineConfig({
 					],
 				},
 				{
-					label: '第3章 理解した上で考える',
+					label: '第3章 コンテナを理解した上で考える',
 					items: [
 						{ label: '1. 自作したランタイムの位置づけ', slug: 'part3/runtime-position' },
-						{ label: '2. 理解した上で考える', slug: 'part3/think-with-knowledge' },
-						{ label: '3. 隔離の限界と過去の脆弱性', slug: 'part3/limits-and-vulnerabilities' },
-						{ label: '4. コンテナ技術の最近の動向', slug: 'part3/recent-trends' },
-						{ label: '5. その先', slug: 'part3/next-steps' },
+						{ label: '2. コンテナを理解した上で考える', slug: 'part3/think-with-knowledge' },
+						{ label: '3. コンテナ技術の最近の動向', slug: 'part3/recent-trends' },
+						{ label: '4. その先', slug: 'part3/next-steps' },
 					],
 				},
 			],

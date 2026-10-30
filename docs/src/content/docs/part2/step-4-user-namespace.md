@@ -24,6 +24,13 @@ $ ls -ln rootfs/tmp/owner-test
 
 root のままだと、何が困るのでしょうか。例えば、コンテナの隔離を何らかの方法で破って、外に出られてしまったとします。そのとき、コンテナの中の root がホストの root そのものだったら、ホストを好きなようにされてしまいます。逆に、ホストでは権限のない一般ユーザーなら、被害を小さく抑えられます。
 
+このステップで足すのは、図の「追加」の部分です。
+
+```mermaid
+flowchart LR
+    R["run<br/>(ホストでは root)"] -->|"CLONE_NEWUSER で clone (追加)<br/>uid 0 を 100000 に対応させる"| C["child<br/>中では root、ホストから見ると uid 100000"] -->|exec| X["指定したコマンド"]
+```
+
 これを実現するのが、user namespace です。ユーザー ID (uid) とグループ ID (gid) の対応表 (マッピング) を、namespace ごとに持てます。例えば、「コンテナの中の uid 0 から 65536 個を、ホストの uid 100000 から 65536 個に対応させる」と決めると、コンテナの中の `root` は、ホストでは uid 100000 になります。
 
 ```text
@@ -40,6 +47,18 @@ Go では、`SysProcAttr` の `UidMappings` と `GidMappings` に、この対応
 
 `container.go` の `run` で、`-userns` が指定されたときの設定を足します。`Cloneflags` に `CLONE_NEWUSER` を足して、`UidMappings` と `GidMappings` に `{ContainerID: 0, HostID: 100000, Size: 65536}` を、`Credential` に `Uid: 0, Gid: 0, NoSetGroups: true` を指定します。
 
+次の雛形の、コメントで示した場所に実装を書きます。`-` の行は消してください。
+
+```diff title="container.go"
+ 	cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: flags}
++	// -userns のときは、次の設定を足す
++	//   - Cloneflags に、user namespace を作るフラグを足す
++	//   - UidMappings と GidMappings に、{ContainerID: 0, HostID: 100000, Size: 65536} を指定する
++	//   - Credential に、Uid: 0, Gid: 0, NoSetGroups: true を指定する
+```
+
+実装できたら、`go build -o container .` でビルドが通ることを確認してください。
+
 <details>
 <summary>ヒント 1</summary>
 
@@ -50,15 +69,27 @@ Go では、`SysProcAttr` の `UidMappings` と `GidMappings` に、この対応
 <details>
 <summary>ヒント 2</summary>
 
+実際の差分です。`+` の行を足して、`-` の行を消します。
+
 ```diff title="container.go"
- 	cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: flags}
+--- a/container.go
++++ b/container.go
+@@ -34,6 +34,15 @@
+ 		cmd.SysProcAttr.UseCgroupFD = true
+ 		cmd.SysProcAttr.CgroupFD = int(cg.dir.Fd())
+ 	}
 +	if opts.userns {
-+		cmd.SysProcAttr.Cloneflags |= /* user namespace を作るフラグ */
++		// コンテナの中の root を、ホストでは権限のない ID の範囲に対応させる。
++		cmd.SysProcAttr.Cloneflags |= syscall.CLONE_NEWUSER
 +		idMap := []syscall.SysProcIDMap{{ContainerID: 0, HostID: 100000, Size: 65536}}
 +		cmd.SysProcAttr.UidMappings = idMap
 +		cmd.SysProcAttr.GidMappings = idMap
++		// user namespace の中で root になる。これがないと、子プロセスは権限を持てない。
 +		cmd.SysProcAttr.Credential = &syscall.Credential{Uid: 0, Gid: 0, NoSetGroups: true}
 +	}
+ 
+ 	return exitCode(cmd.Run())
+ }
 ```
 
 </details>
@@ -70,7 +101,6 @@ Go では、`SysProcAttr` の `UidMappings` と `GidMappings` に、この対応
 package main
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"syscall"
@@ -96,8 +126,6 @@ func run(opts options) (int, error) {
 	// clone のフラグ。作りたい namespace を、ここに足していく。
 	// まずは PID namespace。
 	flags := uintptr(syscall.CLONE_NEWPID)
-	// UTS namespace: ホスト名を分ける。
-	flags |= syscall.CLONE_NEWUTS
 	// mount namespace: マウントを分ける。
 	flags |= syscall.CLONE_NEWNS
 	cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: flags}
@@ -122,13 +150,6 @@ func run(opts options) (int, error) {
 // child は "container child" で実行される。新しい namespace の中で動く。
 // コンテナの準備を終えて、最後に、自分を指定されたコマンドに置き換える。
 func child(opts options) error {
-	// コンテナだけのホスト名を設定する。
-	if opts.hostname != "" {
-		if err := syscall.Sethostname([]byte(opts.hostname)); err != nil {
-			return fmt.Errorf("set hostname: %w", err)
-		}
-	}
-
 	// / を rootfs に差し替える。
 	if opts.rootfs != "" {
 		if err := setupRootfs(opts.rootfs); err != nil {
@@ -155,7 +176,7 @@ go build -o container .
 go test -c -o container.test .
 sudo ./container.test -test.v -test.count=1 -test.run '^TestStep[0-4]_'
 === RUN   TestStep0_RunsCommand
---- PASS: TestStep0_RunsCommand (0.01s)
+--- PASS: TestStep0_RunsCommand (0.02s)
 === RUN   TestStep0_ReturnsExitCode
 --- PASS: TestStep0_ReturnsExitCode (0.01s)
 === RUN   TestStep1_ProcessIsPID1
@@ -163,7 +184,7 @@ sudo ./container.test -test.v -test.count=1 -test.run '^TestStep[0-4]_'
 === RUN   TestStep2_RootfsIsAlpine
 --- PASS: TestStep2_RootfsIsAlpine (0.01s)
 === RUN   TestStep3_MemoryLimitKillsProcess
---- PASS: TestStep3_MemoryLimitKillsProcess (0.10s)
+--- PASS: TestStep3_MemoryLimitKillsProcess (0.08s)
 === RUN   TestStep3_ProcessUnderLimitSucceeds
 --- PASS: TestStep3_ProcessUnderLimitSucceeds (0.01s)
 === RUN   TestStep3_CgroupIsRemoved
@@ -171,7 +192,7 @@ sudo ./container.test -test.v -test.count=1 -test.run '^TestStep[0-4]_'
 === RUN   TestStep4_RootIsMappedToUnprivilegedID
 --- PASS: TestStep4_RootIsMappedToUnprivilegedID (0.01s)
 === RUN   TestStep4_FilesAreOwnedByMappedID
---- PASS: TestStep4_FilesAreOwnedByMappedID (0.05s)
+--- PASS: TestStep4_FilesAreOwnedByMappedID (0.01s)
 PASS
 ```
 
@@ -193,6 +214,15 @@ sh: can't create /etc/os-release: Permission denied
 ```
 
 `/etc/os-release` の持ち主は、ホストでは `root` (uid 0) ですが、その uid は対応表に載っていないので、コンテナの中では `nobody` (65534) に見えます。コンテナの中の `root` には、これを書き換える権限がありません。
+
+## うまくいかないとき
+
+`Credential` を指定し忘れると、コンテナの中で権限がなくなってしまい、`chroot` に失敗します。
+
+```text
+$ sudo ./container run -rootfs rootfs -userns echo hi
+error: chroot: operation not permitted
+```
 
 ## まだ隔離できていないもの
 
