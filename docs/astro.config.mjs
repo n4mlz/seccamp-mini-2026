@@ -28,6 +28,16 @@ export default defineConfig({
 						{ label: '3. 応募課題の解説', slug: 'prerequisites/process-and-syscall' },
 					],
 				},
+				{
+					label: '第1章 コンテナを使う側から理解する',
+					items: [
+						{ label: '1. コンテナとは', slug: 'part1/what-is-container' },
+						{ label: '2. コンテナを使ってみる', slug: 'part1/try-container' },
+						{ label: '3. なぜコンテナは広く使われているのか', slug: 'part1/why-used' },
+						{ label: '4. コンテナはどのように使われているか、今こそ学ぶ意義', slug: 'part1/usecases-and-why-now' },
+						{ label: '5. コンテナと VM の違い', slug: 'part1/vs-vm' },
+					],
+				},
 			],
 		}),
 	],
