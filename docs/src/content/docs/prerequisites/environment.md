@@ -7,7 +7,7 @@ description: 演習用の環境構築と動作確認
 
 演習環境には、Dev Containers を使います。VS Code の拡張機能 [Dev Containers](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) と [Docker](https://docs.docker.com/get-started/get-docker/) をインストールしておいてください。
 
-演習用のリポジトリを Git を用いて clone します。
+[演習用のリポジトリ](https://github.com/n4mlz/seccamp-mini-2026)を Git を用いて clone します。
 
 ```sh
 git clone https://github.com/n4mlz/seccamp-mini-2026.git

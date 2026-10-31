@@ -7,7 +7,7 @@ description: ハンズオンの準備と、動作の確認
 
 ## ブランチを切り替える
 
-このリポジトリには、`main` と `skeleton` という2つのブランチがあります。`main` は全てのステップが完成した状態で、`skeleton` はコンテナの本体がまだ何も書かれていない出発点です。ハンズオンは `skeleton` で進めるので、Dev Container のターミナルで切り替えておきます。詰まったときは、`main` のコードが参考になります。
+[演習用のリポジトリ](https://github.com/n4mlz/seccamp-mini-2026)には、`main` と `skeleton` という2つのブランチがあります。`main` は全てのステップが完成した状態で、`skeleton` はコンテナの本体がまだ何も書かれていない出発点です。ハンズオンは `skeleton` で進めるので、Dev Container のターミナルで切り替えておきます。詰まったときは、`main` のコードが参考になります。
 
 ```text
 $ git switch skeleton
