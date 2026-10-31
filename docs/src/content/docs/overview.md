@@ -15,6 +15,8 @@ description: この講義で何をやるのか
 | 会場 | 長崎県立大学 シーボルト校 |
 | 講師 | 川崎晃太朗（筑波大学） |
 
+公式ページ: https://www.security-camp.or.jp/minicamp/nagasaki2026.html
+
 ## 自己紹介
 
 ![講師写真](../../assets/overview/instructor.jpg)
