@@ -460,15 +460,15 @@ sudo ./container.test -test.v -test.count=1 -test.run '^TestStep[0-5]_'
 === RUN   TestStep0_RunsCommand
 --- PASS: TestStep0_RunsCommand (0.01s)
 === RUN   TestStep0_ReturnsExitCode
---- PASS: TestStep0_ReturnsExitCode (0.02s)
+--- PASS: TestStep0_ReturnsExitCode (0.01s)
 === RUN   TestStep1_ProcessIsPID1
 --- PASS: TestStep1_ProcessIsPID1 (0.01s)
 === RUN   TestStep2_RootfsIsAlpine
---- PASS: TestStep2_RootfsIsAlpine (0.02s)
+--- PASS: TestStep2_RootfsIsAlpine (0.01s)
 === RUN   TestStep3_MemoryLimitKillsProcess
---- PASS: TestStep3_MemoryLimitKillsProcess (0.16s)
+--- PASS: TestStep3_MemoryLimitKillsProcess (0.09s)
 === RUN   TestStep3_ProcessUnderLimitSucceeds
---- PASS: TestStep3_ProcessUnderLimitSucceeds (0.00s)
+--- PASS: TestStep3_ProcessUnderLimitSucceeds (0.01s)
 === RUN   TestStep3_CgroupIsRemoved
 --- PASS: TestStep3_CgroupIsRemoved (0.01s)
 === RUN   TestStep4_RootIsMappedToUnprivilegedID
@@ -476,7 +476,7 @@ sudo ./container.test -test.v -test.count=1 -test.run '^TestStep[0-5]_'
 === RUN   TestStep4_FilesAreOwnedByMappedID
 --- PASS: TestStep4_FilesAreOwnedByMappedID (0.01s)
 === RUN   TestStep5_OnlyOwnInterfacesVisible
---- PASS: TestStep5_OnlyOwnInterfacesVisible (0.03s)
+--- PASS: TestStep5_OnlyOwnInterfacesVisible (0.02s)
 === RUN   TestStep5_CanReachHost
 --- PASS: TestStep5_CanReachHost (0.02s)
 PASS

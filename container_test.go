@@ -161,7 +161,8 @@ func TestExtra3_CpuLimit(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { cmd.Process.Kill(); cmd.Wait() }()
+	// 止めずに、終了を待つ。途中で Kill すると、後片付けが行われずに、cgroup が残ってしまう。
+	defer cmd.Wait()
 
 	for i := 0; i < 50; i++ {
 		files, _ := filepath.Glob("/sys/fs/cgroup/container-*/cpu.max")

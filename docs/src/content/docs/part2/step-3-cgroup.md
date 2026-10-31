@@ -412,11 +412,11 @@ sudo ./container.test -test.v -test.count=1 -test.run '^TestStep[0-3]_'
 === RUN   TestStep2_RootfsIsAlpine
 --- PASS: TestStep2_RootfsIsAlpine (0.01s)
 === RUN   TestStep3_MemoryLimitKillsProcess
---- PASS: TestStep3_MemoryLimitKillsProcess (0.09s)
+--- PASS: TestStep3_MemoryLimitKillsProcess (0.12s)
 === RUN   TestStep3_ProcessUnderLimitSucceeds
---- PASS: TestStep3_ProcessUnderLimitSucceeds (0.01s)
+--- PASS: TestStep3_ProcessUnderLimitSucceeds (0.00s)
 === RUN   TestStep3_CgroupIsRemoved
---- PASS: TestStep3_CgroupIsRemoved (0.01s)
+--- PASS: TestStep3_CgroupIsRemoved (0.00s)
 PASS
 ```
 
@@ -467,6 +467,7 @@ $ sudo ./container run -rootfs rootfs sh -c 'id; touch /tmp/owner-test'
 uid=0(root) gid=0(root) groups=0(root)
 $ ls -ln rootfs/tmp/owner-test
 -rw-r--r-- 1 0 0 0 Oct 30 16:10 rootfs/tmp/owner-test
+$ sudo rm rootfs/tmp/owner-test
 ```
 
 コンテナの中の `root` は、ホストの `root` と同じ存在で、作ったファイルもホストの `root` のものになっています。他にも、ホストのネットワークインターフェースがそのまま見えていて、`mount` のような強力な操作もできてしまいます。
@@ -604,9 +605,9 @@ go build -o container .
 go test -c -o container.test .
 sudo ./container.test -test.v -test.count=1 -test.run '^TestExtra3_'
 === RUN   TestExtra3_PidsLimit
---- PASS: TestExtra3_PidsLimit (0.01s)
+--- PASS: TestExtra3_PidsLimit (0.02s)
 === RUN   TestExtra3_CpuLimit
---- PASS: TestExtra3_CpuLimit (0.10s)
+--- PASS: TestExtra3_CpuLimit (3.01s)
 PASS
 ```
 

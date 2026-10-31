@@ -527,7 +527,7 @@ sudo ./container.test -test.v -test.count=1 -test.run '^TestStep[0-6]_'
 === RUN   TestStep0_ReturnsExitCode
 --- PASS: TestStep0_ReturnsExitCode (0.01s)
 === RUN   TestStep1_ProcessIsPID1
---- PASS: TestStep1_ProcessIsPID1 (0.02s)
+--- PASS: TestStep1_ProcessIsPID1 (0.01s)
 === RUN   TestStep2_RootfsIsAlpine
 --- PASS: TestStep2_RootfsIsAlpine (0.01s)
 === RUN   TestStep3_MemoryLimitKillsProcess

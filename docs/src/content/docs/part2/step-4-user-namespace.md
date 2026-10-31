@@ -176,7 +176,7 @@ go build -o container .
 go test -c -o container.test .
 sudo ./container.test -test.v -test.count=1 -test.run '^TestStep[0-4]_'
 === RUN   TestStep0_RunsCommand
---- PASS: TestStep0_RunsCommand (0.02s)
+--- PASS: TestStep0_RunsCommand (0.01s)
 === RUN   TestStep0_ReturnsExitCode
 --- PASS: TestStep0_ReturnsExitCode (0.01s)
 === RUN   TestStep1_ProcessIsPID1
@@ -184,9 +184,9 @@ sudo ./container.test -test.v -test.count=1 -test.run '^TestStep[0-4]_'
 === RUN   TestStep2_RootfsIsAlpine
 --- PASS: TestStep2_RootfsIsAlpine (0.01s)
 === RUN   TestStep3_MemoryLimitKillsProcess
---- PASS: TestStep3_MemoryLimitKillsProcess (0.08s)
+--- PASS: TestStep3_MemoryLimitKillsProcess (0.12s)
 === RUN   TestStep3_ProcessUnderLimitSucceeds
---- PASS: TestStep3_ProcessUnderLimitSucceeds (0.01s)
+--- PASS: TestStep3_ProcessUnderLimitSucceeds (0.00s)
 === RUN   TestStep3_CgroupIsRemoved
 --- PASS: TestStep3_CgroupIsRemoved (0.01s)
 === RUN   TestStep4_RootIsMappedToUnprivilegedID
