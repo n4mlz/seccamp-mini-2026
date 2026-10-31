@@ -10,3 +10,19 @@
 		--sl-text-h3: var(--sl-text-xl);
 	}
 }
+
+/* 写真を、同じ大きさ (4:3) で、横に3枚並べる。 */
+.photo-row p {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: 0.5rem;
+	margin: 1rem 0;
+}
+
+.photo-row img {
+	width: 100%;
+	height: auto;
+	margin: 0;
+	aspect-ratio: 4 / 3;
+	object-fit: cover;
+}

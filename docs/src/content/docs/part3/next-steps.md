@@ -31,9 +31,29 @@ flowchart LR
 
 ## コミュニティの紹介
 
+### CloudNative Days
+
 ![CloudNative Days](../../../assets/part3/cloudnativedays-logo.png)
 
+<div class="photo-row">
+
+![CloudNative Days の看板](../../../assets/part3/cloudnativedays-sign.jpg)
+![CloudNative Days のノベルティ](../../../assets/part3/cloudnativedays-goods.jpg)
+![CloudNative Days での登壇の様子](../../../assets/part3/cloudnativedays-talk.jpg)
+
+</div>
+
+### KubeCon
+
 ![KubeCon + CloudNativeCon](../../../assets/part3/kubecon-japan-2026.png)
+
+<div class="photo-row">
+
+![KubeCon + CloudNativeCon Japan 2026 の会場の看板](../../../assets/part3/kubecon-banner.jpg)
+![KubeCon のスポンサーブース](../../../assets/part3/kubecon-booth.jpg)
+![KubeCon の展示ホール](../../../assets/part3/kubecon-hall.jpg)
+
+</div>
 
 コンテナやクラウドネイティブの技術は、コミュニティが中心になって育てています。CNCF (Cloud Native Computing Foundation) は、Kubernetes や containerd などのプロジェクトを預かっていて、Linux Foundation の下にあります。日本でも、CloudNative Days のようなカンファレンスが開かれていて、実際に使っている人や、開発している人の話を聞けます。興味があれば、覗いてみてください。
 
