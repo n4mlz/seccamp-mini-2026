@@ -9,7 +9,7 @@ description: ハンズオンで起きやすいエラーと、その対処
 
 `the tests need root privileges` と出る場合は、`go test` を直接実行していないでしょうか。テストには root 権限が必要なので、`make test` を使ってください。`make test` は、ビルドまでを自分のユーザーで行って、テストのバイナリだけを `sudo` で実行します。
 
-`rootfs not found: run make rootfs first` と出る場合は、`make rootfs` をまだ実行していません。ステップ 2 以降で必要です。途中で失敗して、`rootfs` が中途半端な状態で残ってしまったときは、`sudo rm -rf rootfs` で消してから、やり直してください。
+`rootfs not found: run make rootfs first` と出る場合は、`make rootfs` をまだ実行していません。ステップ 2 以降で必要です。途中で失敗して、`rootfs` が中途半端な状態で残ってしまったときは、`sudo rm -rf rootfs` で消してから、やり直してください。`make rootfs` が Docker のエラーで失敗する場合は、`make rootfs-download` を試してください。
 
 ステップ 6 で `golang.org/x/sys` に関するエラーが出る場合は、ライブラリの取得に失敗しています。ネットワークにつながっているかを確認して、`go mod download` を試してみてください。
 

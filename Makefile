@@ -1,13 +1,17 @@
 # STEP でテストを選ぶ。例えば "make test STEP=2" は、ステップ 0 から 2 までのテストを実行する。
 STEP ?= 6
 
-.PHONY: build rootfs test test-extra
+.PHONY: build rootfs rootfs-download test test-extra
 
 build:
 	go build -o container .
 
 rootfs:
 	./scripts/setup-rootfs.sh
+
+# Docker が使えないときの代わり。Alpine Linux の配布元から、直接ダウンロードする。
+rootfs-download:
+	./scripts/setup-rootfs-download.sh
 
 # テストには root 権限が必要。ビルドまでは自分のユーザーで行って、テストのバイナリだけを sudo で実行する。
 test: build
