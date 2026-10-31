@@ -160,7 +160,7 @@ $ sudo ./container run sleep 1000
 もう片方で `ps` を実行すると、`container` と、その子の `sleep` が見つかります。
 
 ```text
-$ ps -o pid,ppid,comm | grep -E 'container|sleep'
+$ ps -eo pid,ppid,comm | grep -E 'container|sleep'
      12       1 container
      19      12 sleep
 ```
